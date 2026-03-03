@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Viewer WRF (1–97) — otimizado</title>
+  <title>Viewer WRF (1–97) — 00z/12z</title>
 
-  <!-- Ajuda a reduzir latência de conexão -->
   <link rel="dns-prefetch" href="//sigmameteorologia.com">
   <link rel="preconnect" href="https://sigmameteorologia.com" crossorigin>
 
@@ -23,18 +22,15 @@
     footer { border-top: 1px solid #1f2a37; border-bottom: none; }
     .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .bar > * { font-size: 14px; }
-    button, input {
+    button, input, select {
       background: #111a25; color: #e6edf3; border: 1px solid #223042;
       border-radius: 10px; padding: 8px 10px;
     }
     button { cursor: pointer; }
     button:hover { border-color: #3a4b63; }
     input { width: 90px; }
-    main {
-      display: grid; place-items: center;
-      overflow: auto;
-      padding: 12px;
-    }
+    select { padding-right: 28px; }
+    main { display: grid; place-items: center; overflow: auto; padding: 12px; }
     .frameWrap { position: relative; }
     img {
       max-width: min(1200px, 98vw);
@@ -69,6 +65,16 @@
   <header>
     <div class="bar">
       <strong>WRF mosaico chuva (acumulado total RS)</strong>
+
+      <span class="muted">|</span>
+      <label>
+        rodada:
+        <select id="runSelect" title="Seleciona 00z ou 12z">
+          <option value="00z">00z</option>
+          <option value="12z">12z</option>
+        </select>
+      </label>
+
       <span class="muted">|</span>
       <span>Frame: <strong id="idxLabel">1</strong> / <span id="maxLabel">97</span></span>
 
@@ -113,20 +119,22 @@
 <script>
 (() => {
   // ======= CONFIG =======
-  const BASE =
-    "https://sigmameteorologia.com/produtos/wrf_produtos//wrf_mosaico_chuva_acum_total_rs_00z_";
+  const ROOT = "https://sigmameteorologia.com/produtos/wrf_produtos//";
+  const PREFIX = "wrf_mosaico_chuva_acum_total_rs_"; // + (00z|12z) + _ + idx + .png
   const EXT = ".png";
   const MIN = 1;
   const MAX = 97;
 
-  // Cache em memória (evita baixar de novo ao voltar). Ajuste conforme sua RAM.
-  const CACHE_LIMIT = 18; // 97 é pesado; 12–24 costuma ser um bom equilíbrio.
+  // Cache em memória (evita baixar de novo ao voltar).
+  const CACHE_LIMIT = 18; // 12–24 costuma ser um bom equilíbrio.
 
   // ======= STATE =======
   let idx = MIN;
-  let navToken = 0; // evita “corrida” ao apertar setas muito rápido
+  let run = "00z";     // 00z ou 12z
+  let navToken = 0;    // evita “corrida” ao apertar setas muito rápido
 
-  // LRU cache: idx -> { img: HTMLImageElement, at: number }
+  // LRU cache: key -> { img: HTMLImageElement, at: number }
+  // key = `${run}:${idx}`
   const cache = new Map();
 
   // ======= ELEMENTS =======
@@ -142,17 +150,19 @@
   const gotoInput = document.getElementById("gotoInput");
   const gotoBtn = document.getElementById("gotoBtn");
   const prefetchInput = document.getElementById("prefetchInput");
+  const runSelect = document.getElementById("runSelect");
 
   maxLabel.textContent = String(MAX);
   gotoInput.max = String(MAX);
 
-  function makeUrl(n) { return `${BASE}${n}${EXT}`; }
+  function makeUrl(n) {
+    return `${ROOT}${PREFIX}${run}_${n}${EXT}`;
+  }
   function clamp(n) { return Math.min(MAX, Math.max(MIN, n)); }
-
   function setStatus(text) { statusEl.textContent = text ? `| ${text}` : ""; }
   function showSpinner(on) { spinner.style.display = on ? "" : "none"; }
 
-  // Mantém cache pequeno e recente (LRU)
+  // ======= LRU CACHE =======
   function touchCache(key, entry) {
     cache.delete(key);
     cache.set(key, entry);
@@ -161,24 +171,21 @@
       cache.delete(oldestKey);
     }
   }
-
   function getCached(n) {
-    const entry = cache.get(n);
+    const key = `${run}:${n}`;
+    const entry = cache.get(key);
     if (!entry) return null;
-    touchCache(n, entry);
+    touchCache(key, entry);
     return entry.img;
   }
 
   async function loadImage(n, { priority = "high" } = {}) {
-    // Se já está em cache, retorna
     const cached = getCached(n);
     if (cached) return cached;
 
     const url = makeUrl(n);
-
     const im = new Image();
     im.decoding = "async";
-    // fetchPriority ajuda em navegadores modernos (não quebra nos outros)
     try { im.fetchPriority = priority; } catch (_) {}
 
     const p = new Promise((resolve, reject) => {
@@ -187,15 +194,14 @@
       im.src = url;
     });
 
-    // Espera baixar
     await p;
 
-    // Tenta decodificar antes de trocar (reduz “engasgo”)
     if (im.decode) {
       try { await im.decode(); } catch (_) {}
     }
 
-    touchCache(n, { img: im, at: Date.now() });
+    const key = `${run}:${n}`;
+    touchCache(key, { img: im, at: Date.now() });
     return im;
   }
 
@@ -208,7 +214,6 @@
     urlLink.href = url;
   }
 
-  // Render com “swap” só quando pronto
   async function render(targetIdx) {
     const myToken = ++navToken;
     idx = clamp(targetIdx);
@@ -219,14 +224,12 @@
 
     try {
       const im = await loadImage(idx, { priority: "high" });
-      // Se no meio do caminho o usuário navegou, descarta este render
       if (myToken !== navToken) return;
 
       imgEl.src = im.src;
       showSpinner(false);
       setStatus("");
 
-      // Prefetch leve do próximo(s), em idle time (não é preload geral)
       schedulePrefetch();
     } catch (e) {
       if (myToken !== navToken) return;
@@ -235,6 +238,7 @@
     }
   }
 
+  // Prefetch leve do(s) próximo(s) (não é preload total)
   function schedulePrefetch() {
     const k = clamp(parseInt(prefetchInput.value, 10) || 0);
     if (k <= 0) return;
@@ -244,13 +248,12 @@
 
     const job = async () => {
       for (let n = start; n <= end; n++) {
-        // se já estiver em cache, pula
-        if (cache.has(n)) continue;
+        const key = `${run}:${n}`;
+        if (cache.has(key)) continue;
         try { await loadImage(n, { priority: "low" }); } catch (_) {}
       }
     };
 
-    // Usa idle time quando disponível, senão usa timeout curto
     if ("requestIdleCallback" in window) {
       requestIdleCallback(() => job(), { timeout: 800 });
     } else {
@@ -273,10 +276,18 @@
     if (e.key === "Enter") goToValue();
   });
 
+  // Troca 00z/12z: limpa cache e recarrega o frame atual (ou 1, se preferir)
+  runSelect.addEventListener("change", () => {
+    run = runSelect.value;   // "00z" ou "12z"
+    cache.clear();           // evita misturar cache de rodadas diferentes
+    navToken++;              // cancela render em andamento
+    render(idx);             // mantém o mesmo frame; se quiser sempre voltar pro 1: render(MIN)
+  });
+
   // Teclado
   window.addEventListener("keydown", (e) => {
     const tag = (document.activeElement?.tagName || "").toLowerCase();
-    const isTyping = tag === "input" || tag === "textarea";
+    const isTyping = tag === "input" || tag === "textarea" || tag === "select";
     if (isTyping && e.key !== "Escape") return;
 
     if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
@@ -286,9 +297,9 @@
   });
 
   // ======= INIT =======
+  runSelect.value = run;
   updateHeader();
-  // Começa na imagem 1
-  render(MIN);
+  render(MIN); // começa na imagem 1
 })();
 </script>
 </body>
