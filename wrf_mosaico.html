@@ -102,7 +102,7 @@
       </label>
 
       <span class="muted">|</span>
-      <span>Frame: <strong id="idxLabel">1</strong> / <span id="maxLabel">97</span></span>
+      <span>Frame: <strong id="idxLabel">2</strong> / <span id="maxLabel">97</span></span>
 
       <span class="muted">|</span>
       <button id="prevBtn" title="Anterior (←)">← Anterior</button>
@@ -111,7 +111,7 @@
       <span class="muted">|</span>
       <label>
         Ir para:
-        <input id="gotoInput" type="number" min="1" max="97" step="1" value="1" />
+        <input id="gotoInput" type="number" min="2" max="97" step="1" value="2" />
       </label>
       <button id="gotoBtn">OK</button>
 
@@ -134,7 +134,7 @@
     </div>
 
     <div class="bar muted hint" style="margin-top:8px">
-      Teclado: <kbd>←</kbd>/<kbd>→</kbd> navega • <kbd>Home</kbd> 1 • <kbd>End</kbd> 97 • <kbd>+</kbd>/<kbd>-</kbd> zoom • <kbd>0</kbd> reset • <kbd>F</kbd> fit • <kbd>Ctrl</kbd>+<kbd>roda</kbd> zoom • arraste para pan
+      Teclado: <kbd>←</kbd>/<kbd>→</kbd> navega • <kbd>Home</kbd> 2 • <kbd>End</kbd> 97 • <kbd>+</kbd>/<kbd>-</kbd> zoom • <kbd>0</kbd> reset • <kbd>F</kbd> fit • <kbd>Ctrl</kbd>+<kbd>roda</kbd> zoom • arraste para pan
     </div>
   </header>
 
@@ -161,7 +161,7 @@
   const ROOT = "https://sigmameteorologia.com/produtos/wrf_produtos//";
   const PREFIX = "wrf_mosaico_chuva_acum_total_rs_"; // + (00z|12z) + _ + idx + .png
   const EXT = ".png";
-  const MIN = 1;
+  const MIN = 2;
   const MAX = 97;
 
   // Cache em memória (evita baixar de novo ao voltar).
@@ -486,7 +486,7 @@
   // ======= INIT =======
   runSelect.value = run;
   updateHeader();
-  // começa na imagem 1
+  // começa na imagem 2
   render(MIN);
 })();
 </script>
