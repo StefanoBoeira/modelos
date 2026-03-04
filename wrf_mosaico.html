@@ -102,6 +102,7 @@
         variável:
         <select id="mosaicSelect" title="Seleciona o tipo de mosaico">
           <option value="chuva">Chuva acumulada</option>
+          <option value="refletividade">Refletividade</option>
           <option value="tempo_severo">Tempo severo</option>
         </select>
       </label>
@@ -202,6 +203,14 @@
       label: "WRF chuva acumulada total RS",
       root: "https://sigmameteorologia.com/produtos/wrf_produtos//",
       prefix: "wrf_mosaico_chuva_acum_total_rs_", // + (00z|12z) + _ + idx + .png
+      min: 2,
+      max: 97,
+      modelEnabled: false
+    },
+    refletividade: {
+      label: "WRF refletividade RS",
+      root: "https://sigmameteorologia.com/produtos/wrf_produtos//",
+      prefix: "wrf_mosaico_maxdbz_rs_", // + (00z|12z) + _ + idx + .png
       min: 2,
       max: 97,
       modelEnabled: false
