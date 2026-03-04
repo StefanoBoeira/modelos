@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Viewer WRF (ECMWF/ICON) — 00z/12z — frames 2–97</title>
+
+  <link rel="dns-prefetch" href="//sigmameteorologia.com">
+  <link rel="preconnect" href="https://sigmameteorologia.com" crossorigin>
+
+  <style>
+    :root { color-scheme: dark; }
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      background:#0b0f14; color:#e6edf3;
+      display:grid; grid-template-rows:auto 1fr auto;
+      height:100vh;
+    }
+    header, footer{
+      padding:10px 14px; background:#0f1620;
+      border-bottom:1px solid #1f2a37;
+    }
+    footer{ border-top:1px solid #1f2a37; border-bottom:none; }
+    .bar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .bar>*{ font-size:14px; }
+    button,input,select{
+      background:#111a25; color:#e6edf3;
+      border:1px solid #223042;
+      border-radius:10px;
+      padding:8px 10px;
+    }
+    button{ cursor:pointer; }
+    button:hover{ border-color:#3a4b63; }
+    button:disabled, input:disabled, select:disabled { opacity:.55; cursor:not-allowed; }
+    input{ width:90px; }
+    select{ padding-right:28px; }
+
+    main{ padding:12px; overflow:hidden; }
+    .viewport{
+      position:relative;
+      width:100%;
+      height:100%;
+      border:1px solid #223042;
+      background:#0f1620;
+      overflow:hidden; /* pan/zoom canvas */
+    }
+    img{
+      position:absolute;
+      top:0; left:0;
+      transform-origin: 0 0;
+      user-select:none;
+      -webkit-user-drag:none;
+      border-radius:0; /* sem cantos arredondados */
+      will-change: transform;
+      image-rendering: auto;
+    }
+    .spinner{
+      position:absolute; inset:10px auto auto 10px;
+      background: rgba(17,26,37,.85);
+      border:1px solid #223042;
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:12px;
+      color:#9fb0c3;
+      user-select:none;
+      z-index:10;
+    }
+    .muted{ color:#9fb0c3; }
+    a{ color:#9bd1ff; text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+    .hint kbd{
+      background:#111a25; border:1px solid #223042; border-bottom-width:2px;
+      padding:2px 6px; border-radius:8px; font-size:12px;
+    }
+    .zoomRow{
+      display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+      margin-top:0;
+    }
+    .hintZoomRow{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    .hintZoomRow .kbdHint{ flex: 1 1 auto; min-width: 260px; }
+    .hintZoomRow .zoomRow{ flex: 0 0 auto; }
+
+    .zoomRow input[type="range"]{ width:160px; }
+    .pill{
+      border:1px solid #223042; background:#111a25;
+      border-radius:999px; padding:2px 10px; font-size:12px;
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div class="bar">
+    <strong>WRF chuva acumulada total RS</strong>
+
+    <span class="muted">|</span>
+    <label>
+      modelo:
+      <select id="modelSelect" title="Seleciona o modelo">
+        <option value="ecmwf">ECMWF</option>
+        <option value="icon">ICON</option>
+      </select>
+    </label>
+
+    <span class="muted">|</span>
+    <label>
+      rodada:
+      <select id="runSelect" title="Seleciona 00z ou 12z">
+        <option value="00z">00z</option>
+        <option value="12z">12z</option>
+      </select>
+    </label>
+
+    <span class="muted">|</span>
+    <span>Frame: <strong id="idxLabel">2</strong> / <span id="maxLabel">97</span></span>
+
+    <span class="muted">|</span>
+    <button id="prevBtn" title="Anterior (←)">← Anterior</button>
+    <button id="nextBtn" title="Próximo (→)">Próximo →</button>
+
+    <span class="muted">|</span>
+    <label>
+      Ir para:
+      <input id="gotoInput" type="number" min="2" max="97" step="1" value="2" />
+    </label>
+    <button id="gotoBtn">OK</button>
+
+    <span class="muted">|</span>
+    <label title="0 = desliga. 1–12 (prefetch leve; 3–6 recomendado).">
+      prefetch próximo:
+      <input id="prefetchInput" type="number" min="0" max="12" step="1" value="6" style="width:70px" />
+    </label>
+
+    <span class="muted">|</span>
+    <button id="clearCacheBtn" title="Limpa o cache em memória">Limpar cache</button>
+  </div>
+
+  <div class="bar muted hintZoomRow" style="margin-top:8px">
+    <div class="kbdHint">
+      Teclado: <kbd>←</kbd>/<kbd>→</kbd> navega • <kbd>Home</kbd> vai para 2 • <kbd>End</kbd> vai para 97 •
+      Zoom: <kbd>Ctrl</kbd>+roda • <kbd>+</kbd>/<kbd>-</kbd> • <kbd>0</kbd> reset • <kbd>F</kbd> ajustar
+    </div>
+
+    <div class="zoomRow">
+    <span class="pill" id="zoomPct">100%</span>
+    <button id="zoomOutBtn" title="Zoom -">−</button>
+    <button id="zoomInBtn" title="Zoom +">+</button>
+    <button id="zoomResetBtn" title="Reset (0)">Reset</button>
+    <button id="zoomFitBtn" title="Ajustar à tela (F)">Fit</button>
+    <label class="muted" title="Zoom (10%–400%)">
+      <input id="zoomRange" type="range" min="0.1" max="4" step="0.05" value="1" />
+    </label>
+    <label class="muted" title="Quando marcado, mantém o zoom ao trocar de frame.">
+      <input id="keepZoomChk" type="checkbox" checked />
+      manter zoom
+    </label>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="viewport" class="viewport">
+    <div id="spinner" class="spinner" style="display:none;">carregando…</div>
+    <img id="img" alt="WRF frame" decoding="async" draggable="false" />
+  </div>
+</main>
+
+<footer>
+  <div class="bar">
+    <span class="muted">URL:</span>
+    <a id="urlLink" href="#" target="_blank" rel="noreferrer noopener">—</a>
+    <span id="status" class="muted"></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // ======= CONFIG =======
+  const MIN = 2;
+  const MAX = 97;
+
+  const MODEL_ROOT = {
+    ecmwf: "https://sigmameteorologia.com/produtos/wrf_ecmwf//",
+    icon:  "https://sigmameteorologia.com/produtos/wrf_icon//"
+  };
+
+  const PREFIX = "wrf_chuva_acum_total_rs_"; // + (00z|12z) + _ + frame + .png
+  const EXT = ".png";
+
+  // Cache em memória (LRU)
+  const CACHE_LIMIT = 24;
+
+  // Zoom limits
+  const ZOOM_MIN = 0.1;
+  const ZOOM_MAX = 4.0;
+
+  // ======= STATE =======
+  let idx = MIN;
+  let run = "00z";
+  let model = "ecmwf";
+  let navToken = 0;
+
+  // Pan/zoom transform
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+
+  // Drag state
+  let dragging = false;
+  let dragStartX = 0, dragStartY = 0;
+  let dragStartTx = 0, dragStartTy = 0;
+
+  // LRU cache: key -> { img: HTMLImageElement, at: number }
+  // key = `${model}|${run}|${idx}`
+  const cache = new Map();
+
+  // ======= ELEMENTS =======
+  const viewport = document.getElementById("viewport");
+  const imgEl = document.getElementById("img");
+  const spinner = document.getElementById("spinner");
+  const idxLabel = document.getElementById("idxLabel");
+  const maxLabel = document.getElementById("maxLabel");
+  const urlLink = document.getElementById("urlLink");
+  const statusEl = document.getElementById("status");
+
+  const prevBtn = document.getElementById("prevBtn");
+  const nextBtn = document.getElementById("nextBtn");
+  const gotoInput = document.getElementById("gotoInput");
+  const gotoBtn = document.getElementById("gotoBtn");
+  const prefetchInput = document.getElementById("prefetchInput");
+  const clearCacheBtn = document.getElementById("clearCacheBtn");
+
+  const runSelect = document.getElementById("runSelect");
+  const modelSelect = document.getElementById("modelSelect");
+
+  const zoomPct = document.getElementById("zoomPct");
+  const zoomRange = document.getElementById("zoomRange");
+  const zoomInBtn = document.getElementById("zoomInBtn");
+  const zoomOutBtn = document.getElementById("zoomOutBtn");
+  const zoomResetBtn = document.getElementById("zoomResetBtn");
+  const zoomFitBtn = document.getElementById("zoomFitBtn");
+  const keepZoomChk = document.getElementById("keepZoomChk");
+
+  maxLabel.textContent = String(MAX);
+  gotoInput.min = String(MIN);
+  gotoInput.max = String(MAX);
+
+  // ======= HELPERS =======
+  function clamp(n) { return Math.min(MAX, Math.max(MIN, n)); }
+  function clampZoom(z) { return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)); }
+  function setStatus(text) { statusEl.textContent = text ? `| ${text}` : ""; }
+  function showSpinner(on) { spinner.style.display = on ? "" : "none"; }
+
+  function makeUrl(n){
+    const root = MODEL_ROOT[model] || MODEL_ROOT.ecmwf;
+    return `${root}${PREFIX}${run}_${n}${EXT}`;
+  }
+
+  // ======= CACHE (LRU) =======
+  function touchCache(key, entry){
+    cache.delete(key);
+    cache.set(key, entry);
+    while (cache.size > CACHE_LIMIT){
+      const oldestKey = cache.keys().next().value;
+      cache.delete(oldestKey);
+    }
+  }
+  function getCached(n){
+    const key = `${model}|${run}|${n}`;
+    const entry = cache.get(key);
+    if (!entry) return null;
+    touchCache(key, entry);
+    return entry.img;
+  }
+  async function loadImage(n, {priority="high"} = {}){
+    const cached = getCached(n);
+    if (cached) return cached;
+
+    const url = makeUrl(n);
+    const im = new Image();
+    im.decoding = "async";
+    try { im.fetchPriority = priority; } catch(_){}
+
+    const p = new Promise((resolve, reject) => {
+      im.onload = resolve;
+      im.onerror = reject;
+      im.src = url;
+    });
+
+    await p;
+
+    if (im.decode){
+      try { await im.decode(); } catch(_){}
+    }
+
+    const key = `${model}|${run}|${n}`;
+    touchCache(key, { img: im, at: Date.now() });
+    return im;
+  }
+
+  // ======= PAN/ZOOM =======
+  function applyTransform(){
+    imgEl.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    zoomRange.value = String(scale);
+    zoomPct.textContent = `${Math.round(scale * 100)}%`;
+  }
+
+  function resetView(){
+    scale = 1;
+    tx = 0;
+    ty = 0;
+    applyTransform();
+  }
+
+  function fitToViewport(){
+    // Precisa do tamanho natural da imagem já carregada
+    const iw = imgEl.naturalWidth || 1;
+    const ih = imgEl.naturalHeight || 1;
+
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+
+    const s = Math.min(vw / iw, vh / ih);
+    scale = clampZoom(s);
+
+    // Centraliza
+    const w = iw * scale;
+    const h = ih * scale;
+    tx = Math.round((vw - w) / 2);
+    ty = Math.round((vh - h) / 2);
+    applyTransform();
+  }
+
+  function zoomAtPoint(newScale, cx, cy){
+    newScale = clampZoom(newScale);
+
+    // Converte o ponto do viewport para coordenadas do "mundo" (antes do zoom)
+    const worldX = (cx - tx) / scale;
+    const worldY = (cy - ty) / scale;
+
+    // Atualiza escala e reposiciona para manter o ponto sob o cursor
+    scale = newScale;
+    tx = cx - worldX * scale;
+    ty = cy - worldY * scale;
+
+    applyTransform();
+  }
+
+  // Drag (pan)
+  viewport.addEventListener("pointerdown", (e) => {
+    // botão esquerdo
+    if (e.button !== 0) return;
+    dragging = true;
+    viewport.setPointerCapture(e.pointerId);
+
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    dragStartTx = tx;
+    dragStartTy = ty;
+  });
+
+  viewport.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    tx = dragStartTx + dx;
+    ty = dragStartTy + dy;
+    applyTransform();
+  });
+
+  viewport.addEventListener("pointerup", (e) => {
+    dragging = false;
+    try { viewport.releasePointerCapture(e.pointerId); } catch(_){}
+  });
+  viewport.addEventListener("pointercancel", () => dragging = false);
+
+  // Wheel zoom (Ctrl+roda / trackpad pinch costuma vir com ctrlKey)
+  viewport.addEventListener("wheel", (e) => {
+    const zooming = e.ctrlKey || e.metaKey || e.altKey;
+    if (!zooming) return; // mantém scroll normal (que aqui é nada)
+    e.preventDefault();
+
+    const rect = viewport.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+
+    const factor = Math.exp(-e.deltaY * 0.002);
+    zoomAtPoint(scale * factor, cx, cy);
+  }, { passive: false });
+
+  // Controles de zoom
+  zoomRange.addEventListener("input", () => {
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(parseFloat(zoomRange.value), rect.width/2, rect.height/2);
+  });
+  zoomInBtn.addEventListener("click", () => {
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(scale * 1.15, rect.width/2, rect.height/2);
+  });
+  zoomOutBtn.addEventListener("click", () => {
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(scale / 1.15, rect.width/2, rect.height/2);
+  });
+  zoomResetBtn.addEventListener("click", resetView);
+  zoomFitBtn.addEventListener("click", fitToViewport);
+
+  // ======= UI UPDATE =======
+  function updateHeader(){
+    idxLabel.textContent = String(idx);
+    gotoInput.value = String(idx);
+
+    const url = makeUrl(idx);
+    urlLink.textContent = url;
+    urlLink.href = url;
+  }
+
+  // ======= RENDER =======
+  async function render(targetIdx, { forceResetZoom = false } = {}){
+    const myToken = ++navToken;
+    idx = clamp(targetIdx);
+    updateHeader();
+
+    showSpinner(true);
+    setStatus("carregando…");
+
+    try{
+      const im = await loadImage(idx, { priority: "high" });
+      if (myToken !== navToken) return;
+
+      imgEl.src = im.src;
+
+      // ao trocar o src, garante que temos naturalWidth/naturalHeight
+      // (já decodificado no loader, mas o elemento pode demorar 1 tick)
+      requestAnimationFrame(() => {
+        if (forceResetZoom || !keepZoomChk.checked){
+          fitToViewport();
+        } else {
+          applyTransform();
+        }
+      });
+
+      showSpinner(false);
+      setStatus("");
+
+      schedulePrefetch();
+    } catch(e){
+      if (myToken !== navToken) return;
+      showSpinner(false);
+      setStatus("erro ao carregar (imagem pode não existir ou hotlink bloqueado)");
+    }
+  }
+
+  // Prefetch leve do(s) próximo(s)
+  function schedulePrefetch(){
+    const kRaw = parseInt(prefetchInput.value, 10);
+    const k = Math.max(0, Math.min(12, isNaN(kRaw) ? 0 : kRaw));
+    if (k <= 0) return;
+
+    const start = idx + 1;
+    const end = Math.min(MAX, idx + k);
+    const currentModel = model;
+    const currentRun = run;
+
+    const job = async () => {
+      for (let n = start; n <= end; n++){
+        // se usuário trocar run/model no meio, para pra não desperdiçar
+        if (model !== currentModel || run !== currentRun) return;
+        const key = `${model}|${run}|${n}`;
+        if (cache.has(key)) continue;
+        try { await loadImage(n, { priority: "low" }); } catch(_){}
+      }
+    };
+
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(() => job(), { timeout: 800 });
+    } else {
+      setTimeout(job, 60);
+    }
+  }
+
+  // ======= NAVIGATION =======
+  function prev(){ render(idx - 1); }
+  function next(){ render(idx + 1); }
+
+  prevBtn.addEventListener("click", prev);
+  nextBtn.addEventListener("click", next);
+
+  function goToValue(){
+    const n = clamp(parseInt(gotoInput.value, 10));
+    render(n);
+  }
+  gotoBtn.addEventListener("click", goToValue);
+  gotoInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") goToValue();
+  });
+
+  clearCacheBtn.addEventListener("click", () => {
+    cache.clear();
+    setStatus("cache limpo");
+    setTimeout(() => setStatus(""), 800);
+  });
+
+  // Trocas de modelo/rodada
+  modelSelect.addEventListener("change", () => {
+    model = modelSelect.value;
+    navToken++;
+    cache.clear(); // evita consumir RAM com outro conjunto; pode remover se quiser manter
+    render(idx, { forceResetZoom: false });
+  });
+
+  runSelect.addEventListener("change", () => {
+    run = runSelect.value;
+    navToken++;
+    cache.clear();
+    render(idx, { forceResetZoom: false });
+  });
+
+  // Teclado (inclui zoom)
+  window.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement?.tagName || "").toLowerCase();
+    const isTyping = tag === "input" || tag === "textarea" || tag === "select";
+    if (isTyping && e.key !== "Escape") return;
+
+    if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); next(); }
+    else if (e.key === "Home") { e.preventDefault(); render(MIN); }
+    else if (e.key === "End") { e.preventDefault(); render(MAX); }
+    else if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      zoomAtPoint(scale * 1.15, rect.width/2, rect.height/2);
+    }
+    else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      zoomAtPoint(scale / 1.15, rect.width/2, rect.height/2);
+    }
+    else if (e.key === "0") { e.preventDefault(); resetView(); }
+    else if (e.key.toLowerCase() === "f") { e.preventDefault(); fitToViewport(); }
+  });
+
+  // ======= INIT =======
+  modelSelect.value = model;
+  runSelect.value = run;
+
+  idx = MIN;
+  gotoInput.value = String(MIN);
+  updateHeader();
+  resetView();
+  render(MIN, { forceResetZoom: true });
+})();
+</script>
+</body>
+</html>
