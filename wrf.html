@@ -131,14 +131,14 @@
     <span class="muted">|</span>
     <label>
       Ir para:
-      <input id="gotoInput" type="number" min="2" max="97" step="1" value="2" style="width:50px" />
+      <input id="gotoInput" type="number" min="2" max="97" step="1" value="2" />
     </label>
     <button id="gotoBtn">OK</button>
 
     <span class="muted">|</span>
     <label title="0 = desliga. 1–12 (prefetch leve; 3–6 recomendado).">
       prefetch próximo:
-      <input id="prefetchInput" type="number" min="0" max="12" step="1" value="6" style="width:50px" />
+      <input id="prefetchInput" type="number" min="0" max="12" step="1" value="6" style="width:70px" />
     </label>
 
     <span class="muted">|</span>
@@ -323,11 +323,53 @@ const EXT = ".png";
   }
 
   // ======= PAN/ZOOM =======
+function canPan(){
+  const iw = imgEl.naturalWidth;
+  const ih = imgEl.naturalHeight;
+  if (!iw || !ih) return false;
+
+  const vw = viewport.clientWidth;
+  const vh = viewport.clientHeight;
+
+  return (iw * scale > vw + 1) || (ih * scale > vh + 1);
+}
+
+function constrainPan(){
+  const iw = imgEl.naturalWidth;
+  const ih = imgEl.naturalHeight;
+  if (!iw || !ih) return;
+
+  const vw = viewport.clientWidth;
+  const vh = viewport.clientHeight;
+
+  const w = iw * scale;
+  const h = ih * scale;
+
+  // Se a imagem couber no viewport, mantém centralizada (sem "soltar")
+  if (w <= vw){
+    tx = Math.round((vw - w) / 2);
+  } else {
+    const minTx = vw - w;
+    const maxTx = 0;
+    tx = Math.min(maxTx, Math.max(minTx, tx));
+  }
+
+  if (h <= vh){
+    ty = Math.round((vh - h) / 2);
+  } else {
+    const minTy = vh - h;
+    const maxTy = 0;
+    ty = Math.min(maxTy, Math.max(minTy, ty));
+  }
+}
+
   function applyTransform(){
+    constrainPan();
     imgEl.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
     const pct = Math.round(scale * 100);
     zoomRange.value = String(pct);
     zoomPct.textContent = `${pct}%`;
+    viewport.style.cursor = canPan() ? (dragging ? "grabbing" : "grab") : "default";
   }
 
   function resetView(){
@@ -375,6 +417,8 @@ const EXT = ".png";
   viewport.addEventListener("pointerdown", (e) => {
     // botão esquerdo
     if (e.button !== 0) return;
+    if (!canPan()) return;
+
     dragging = true;
     viewport.setPointerCapture(e.pointerId);
 
@@ -382,6 +426,7 @@ const EXT = ".png";
     dragStartY = e.clientY;
     dragStartTx = tx;
     dragStartTy = ty;
+    applyTransform();
   });
 
   viewport.addEventListener("pointermove", (e) => {
@@ -396,8 +441,9 @@ const EXT = ".png";
   viewport.addEventListener("pointerup", (e) => {
     dragging = false;
     try { viewport.releasePointerCapture(e.pointerId); } catch(_){}
+    applyTransform();
   });
-  viewport.addEventListener("pointercancel", () => dragging = false);
+  viewport.addEventListener("pointercancel", () => { dragging = false; applyTransform(); });
 
   // Wheel zoom (Ctrl+roda / trackpad pinch costuma vir com ctrlKey)
   viewport.addEventListener("wheel", (e) => {
