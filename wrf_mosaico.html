@@ -181,6 +181,8 @@
   let naturalW = 0;
   let naturalH = 0;
 
+  let didInitialFit = false; // aplica Fit automaticamente ao abrir
+
   // LRU cache: key -> { img: HTMLImageElement, at: number }
   // key = `${run}:${idx}`
   const cache = new Map();
@@ -341,9 +343,13 @@
       naturalH = im.naturalHeight || naturalH;
 
       imgEl.src = im.src;
-      applyZoom(false);
-
-      showSpinner(false);
+      if (!didInitialFit) {
+        fitToViewport();
+        didInitialFit = true;
+      } else {
+        applyZoom(false);
+      }
+showSpinner(false);
       setStatus("");
 
       schedulePrefetch();
