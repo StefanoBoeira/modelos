@@ -247,13 +247,21 @@
 
   let navToken = 0;     // evita “corrida” ao apertar setas muito rápido
 
-  // Cache-busting: força buscar imagens mais recentes mesmo que o .png seja sobrescrito no servidor/CDN
-  const makeBust = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  let cacheBust = makeBust();
-  function bumpCacheBust() { cacheBust = makeBust(); }
+  // Cache-busting robusto (timestamp por requisição)
+  let reqSeq = 0;
+  const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutos (reduza/aumente conforme necessidade)
+
+  function makeTimestamp(){
+    // ms + contador garante unicidade mesmo no mesmo milissegundo
+    return `${Date.now()}_${++reqSeq}`;
+  }
+
+  // Mantido por compatibilidade com a lógica anterior
+  function bumpCacheBust() { reqSeq++; }
+
   function withBust(url) {
     const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}v=${cacheBust}`;
+    return `${url}${sep}t=${makeTimestamp()}`;
   }
 
   let zoom = 1.0;
@@ -355,11 +363,16 @@
     const key = `${mosaic}:${model}:${run}:${n}`;
     const entry = cache.get(key);
     if (!entry) return null;
+
+    // Expira rápido para evitar “grudar” imagens antigas quando o servidor atualiza o mesmo nome de arquivo
+    if (Date.now() - entry.at > CACHE_TTL_MS) {
+      cache.delete(key);
+      return null;
+    }
+
     touchCache(key, entry);
     return entry.img;
-  }
-
-  async function loadImage(n, { priority = "high" } = {}) {
+  }async function loadImage(n, { priority = "high" } = {}) {
     const cached = getCached(n);
     if (cached) return cached;
 
@@ -490,7 +503,9 @@
     const job = async () => {
       for (let n = start; n <= end; n++) {
         const key = `${mosaic}:${model}:${run}:${n}`;
-        if (cache.has(key)) continue;
+        const entry = cache.get(key);
+        if (entry && (Date.now() - entry.at <= CACHE_TTL_MS)) continue;
+        if (entry) cache.delete(key);
         try { await loadImage(n, { priority: "low" }); } catch (_) {}
       }
     };

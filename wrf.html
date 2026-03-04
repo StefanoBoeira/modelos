@@ -216,12 +216,19 @@ const EXT = ".png";
   let navToken = 0;
 
 
-  // Cache-buster para ignorar cache do navegador/CDN ao trocar seleções
-  let cacheBust = Date.now().toString(36);
-  function bumpCacheBust(){
-    cacheBust = Date.now().toString(36);
+  // Cache-busting robusto: timestamp por requisição (evita imagens antigas mesmo com .png sobrescritos)
+  let reqSeq = 0;
+  const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutos (reduza/aumente se quiser mais/menos agressivo)
+
+  function makeTimestamp(){
+    // ms + contador garante unicidade mesmo no mesmo milissegundo
+    return `${Date.now()}_${++reqSeq}`;
   }
 
+  // Mantido por compatibilidade com a lógica anterior
+  function bumpCacheBust(){
+    reqSeq++;
+  }
 
   // Tenta limpar Cache Storage (PWA/service worker), se existir
   function clearBrowserCaches(){
@@ -292,7 +299,7 @@ const EXT = ".png";
   function makeUrl(n){
     const base = makeUrlBase(n);
     const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}v=${cacheBust}`;
+    return `${base}${sep}t=${makeTimestamp()}`;
   }
 
   function updateVarTitle(){
@@ -314,10 +321,16 @@ const EXT = ".png";
     const key = `${model}|${run}|${variable}|${n}`;
     const entry = cache.get(key);
     if (!entry) return null;
+
+    // Expira rápido para evitar “grudar” imagens antigas quando o servidor atualiza o mesmo nome de arquivo
+    if (Date.now() - entry.at > CACHE_TTL_MS){
+      cache.delete(key);
+      return null;
+    }
+
     touchCache(key, entry);
     return entry.img;
-  }
-  async function loadImage(n, {priority="high"} = {}){
+  }async function loadImage(n, {priority="high"} = {}){
     const cached = getCached(n);
     if (cached) return cached;
 
@@ -562,7 +575,9 @@ function constrainPan(){
         // se usuário trocar run/model no meio, para pra não desperdiçar
         if (model !== currentModel || run !== currentRun || variable !== currentVar) return;
         const key = `${model}|${run}|${variable}|${n}`;
-        if (cache.has(key)) continue;
+        const entry = cache.get(key);
+        if (entry && (Date.now() - entry.at <= CACHE_TTL_MS)) continue;
+        if (entry) cache.delete(key);
         try { await loadImage(n, { priority: "low" }); } catch(_){}
       }
     };
