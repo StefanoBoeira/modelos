@@ -147,7 +147,7 @@
       </label>
 
       <span class="muted">|</span>
-      <button id="clearCacheBtn" title="Limpa o cache em memória (não afeta o navegador)">Limpar cache</button>
+      <button id="clearCacheBtn" title="Força recarregar as imagens (ignora cache do navegador/CDN)">Limpar cache</button>
     </div>
 
     <div class="barSplit muted hint">
@@ -247,6 +247,15 @@
 
   let navToken = 0;     // evita “corrida” ao apertar setas muito rápido
 
+  // Cache-busting: força buscar imagens mais recentes mesmo que o .png seja sobrescrito no servidor/CDN
+  const makeBust = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  let cacheBust = makeBust();
+  function bumpCacheBust() { cacheBust = makeBust(); }
+  function withBust(url) {
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}v=${cacheBust}`;
+  }
+
   let zoom = 1.0;
   let naturalW = 0;
   let naturalH = 0;
@@ -305,7 +314,8 @@
 
   function makeUrl(n) {
     const cfg = currentCfg();
-    return `${currentRoot()}${cfg.prefix}${run}_${n}${EXT}`;
+    const base = `${currentRoot()}${cfg.prefix}${run}_${n}${EXT}`;
+    return withBust(base);
   }
 
   function syncBoundsFromCfg() {
@@ -507,18 +517,32 @@
     if (e.key === "Enter") goToValue();
   });
 
-  function resetNavigationContext({ keepIdx = true } = {}) {
+  function resetNavigationContext({ keepIdx = true, bust = true } = {}) {
     cache.clear();
+    if (bust) bumpCacheBust();
     navToken++;        // cancela render em andamento
     didInitialFit = false;
     idx = keepIdx ? clamp(idx) : MIN;
   }
 
-  // Limpar cache (botão)
-  clearCacheBtn.addEventListener("click", () => {
-    cache.clear();
+  // Limpar cache (botão) — força recarregar ignorando cache do navegador
+  clearCacheBtn.addEventListener("click", async () => {
+    setStatus("forçando atualização…");
+
+    // Limpa cache em memória + muda o token de versão (cache-busting)
+    resetNavigationContext({ keepIdx: true, bust: true });
+
+    // Tenta limpar Cache Storage (se existir; ex.: PWA / service worker)
+    try {
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch (_) {}
+
+    await render(idx);
+
     setStatus("cache limpo");
-    // some a mensagem depois de um tempinho
     setTimeout(() => setStatus(""), 900);
   });
 
