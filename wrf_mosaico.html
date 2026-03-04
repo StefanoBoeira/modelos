@@ -3,94 +3,118 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Viewer WRF — 00z/12z</title>
+  <title>Mosaico WRF — 00z/12z</title>
 
   <link rel="dns-prefetch" href="//sigmameteorologia.com">
   <link rel="preconnect" href="https://sigmameteorologia.com" crossorigin>
 
   <style>
     :root { color-scheme: dark; }
-    body {
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: #0b0f14; color: #e6edf3;
-      display: grid; grid-template-rows: auto 1fr auto;
-      height: 100vh;
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      background:#0b0f14; color:#e6edf3;
+      display:grid; grid-template-rows:auto 1fr auto;
+      height:100vh;
     }
-    header, footer {
-      padding: 10px 14px; background: #0f1620; border-bottom: 1px solid #1f2a37;
+    header, footer{
+      padding:10px 14px; background:#0f1620; border-bottom:1px solid #1f2a37;
     }
-    footer { border-top: 1px solid #1f2a37; border-bottom: none; }
-    .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .bar > * { font-size: 14px; }
-    button, input, select {
-      background: #111a25; color: #e6edf3; border: 1px solid #223042;
-      border-radius: 10px; padding: 8px 10px;
+    footer{ border-top:1px solid #1f2a37; border-bottom:none; }
+
+    .bar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .bar > *{ font-size:14px; }
+    .barSplit{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+    .barSplit .right{ margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+    button, input, select{
+      background:#111a25; color:#e6edf3; border:1px solid #223042;
+      border-radius:10px; padding:8px 10px;
     }
-    button { cursor: pointer; }
-    button:hover { border-color: #3a4b63; }
-    button:disabled { opacity: .65; cursor: not-allowed; }
-    input { width: 90px; }
-    select { padding-right: 28px; }
+    button{ cursor:pointer; }
+    button:hover{ border-color:#3a4b63; }
+    button:disabled{ opacity:.65; cursor:not-allowed; }
+
+    select{ padding-right:28px; }
+    input{ width:64px; }                 /* reduz “Ir para” */
+    .tinyInput{ width:54px; }            /* reduz “prefetch” */
+    .muted{ color:#9fb0c3; }
 
     /* Viewport rolável para pan/zoom */
-    main { overflow: hidden; padding: 12px; }
-    #viewport {
-      width: 100%;
-      height: 100%;
-      overflow: auto;
-      display: flex;
-      align-items: flex-start;
-      justify-content: flex-start;
-      cursor: grab;
+    main{ overflow:hidden; padding:12px; }
+    #viewport{
+      width:100%; height:100%;
+      overflow:auto;
+      display:flex; align-items:flex-start; justify-content:flex-start;
+      cursor:grab;
     }
-    #viewport.dragging { cursor: grabbing; }
-    .frameWrap {
-      position: relative;
-      margin: auto; /* centraliza quando couber */
-    }
+    #viewport.dragging{ cursor:grabbing; }
+    .frameWrap{ position:relative; margin:auto; }
 
-    img {
-      /* Sem cantos arredondados */
-      border-radius: 0;
-
-      /* Removemos max-* porque o tamanho passa a ser controlado pelo zoom */
-      max-width: none;
-      max-height: none;
-
-      border: 1px solid #223042;
-      background: #0f1620;
-      display: block;
-      user-select: none;
-      -webkit-user-drag: none;
+    img{
+      border-radius:0;
+      max-width:none; max-height:none;
+      border:1px solid #223042;
+      background:#0f1620;
+      display:block;
+      user-select:none;
+      -webkit-user-drag:none;
     }
 
-    .spinner {
-      position: absolute;
-      inset: 10px auto auto 10px;
-      background: rgba(17,26,37,.85);
-      border: 1px solid #223042;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-      color: #9fb0c3;
-      user-select: none;
+    .spinner{
+      position:absolute;
+      inset:10px auto auto 10px;
+      background:rgba(17,26,37,.85);
+      border:1px solid #223042;
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:12px;
+      color:#9fb0c3;
+      user-select:none;
     }
-    .muted { color: #9fb0c3; }
-    a { color: #9bd1ff; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .hint kbd {
+
+    a{ color:#9bd1ff; text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+
+    .hint kbd{
       background:#111a25; border:1px solid #223042; border-bottom-width:2px;
-      padding:2px 6px; border-radius:8px; font-size: 12px;
+      padding:2px 6px; border-radius:8px; font-size:12px;
     }
-    .smallInput { width: 70px; }
-    .zoomGroup { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    input[type="range"] { width: 180px; }
+
+    /* Zoom (realocado para a linha de baixo, à direita) */
+    .zoomGroup{ display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    input[type="range"]{ width:220px; }
+    #zoomLabel{
+      background:#111a25; border:1px solid #223042;
+      border-radius:999px; padding:3px 8px;
+      font-size:12px; color:#9fb0c3;
+    }
+    .checkWrap{ display:inline-flex; gap:8px; align-items:center; }
+    .checkWrap input{ width:auto; padding:0; }
   </style>
 </head>
 <body>
   <header>
     <div class="bar">
-      <strong>WRF mosaico (acumulado total RS)</strong>
+      <strong id="titleStrong" title="WRF = Weather Research and Forecasting">WRF chuva acumulada total RS</strong>
+
+      <span class="muted">|</span>
+      <label>
+        variável:
+        <select id="mosaicSelect" title="Seleciona o tipo de mosaico">
+          <option value="chuva">Chuva acumulada</option>
+          <option value="tempo_severo">Tempo severo</option>
+        </select>
+      </label>
+
+      <span id="modelSep" class="muted">|</span>
+      <label id="modelWrap">
+        modelo:
+        <select id="modelSelect"
+                title="ICON = Icosahedral Nonhydrostatic • ECMWF = European Centre for Medium-Range Weather Forecasts">
+          <option value="icon" title="ICON = Icosahedral Nonhydrostatic">ICON</option>
+          <option value="ecmwf" title="ECMWF = European Centre for Medium-Range Weather Forecasts">ECMWF</option>
+        </select>
+      </label>
 
       <span class="muted">|</span>
       <label>
@@ -118,23 +142,35 @@
       <span class="muted">|</span>
       <label title="0 = desliga. 1–3 = recomendado (prefetch leve, não preload total).">
         prefetch próximo:
-        <input id="prefetchInput" class="smallInput" type="number" min="0" max="12" step="1" value="6" />
+        <input id="prefetchInput" class="tinyInput" type="number" min="0" max="12" step="1" value="6" />
       </label>
 
       <span class="muted">|</span>
-      <span class="zoomGroup" title="Atalhos: Ctrl + roda do mouse, +/-, 0 (reset), F (fit)">
-        zoom:
-        <button id="zoomOutBtn" aria-label="Zoom -">−</button>
-        <input id="zoomRange" type="range" min="25" max="600" step="5" value="100" />
-        <button id="zoomInBtn" aria-label="Zoom +">+</button>
-        <button id="zoomResetBtn" title="Reset (0)">Reset</button>
-        <button id="zoomFitBtn" title="Ajustar à tela (F)">Fit</button>
-        <span class="muted" id="zoomLabel">100%</span>
-      </span>
+      <button id="clearCacheBtn" title="Limpa o cache em memória (não afeta o navegador)">Limpar cache</button>
     </div>
 
-    <div class="bar muted hint" style="margin-top:8px">
-      Teclado: <kbd>←</kbd>/<kbd>→</kbd> navega • <kbd>Home</kbd> 2 • <kbd>End</kbd> 97 • <kbd>+</kbd>/<kbd>-</kbd> zoom • <kbd>0</kbd> reset • <kbd>F</kbd> fit • <kbd>Ctrl</kbd>+<kbd>roda</kbd> zoom • arraste para pan
+    <div class="barSplit muted hint">
+      <div class="left">
+        Teclado:
+        <kbd>←</kbd>/<kbd>→</kbd> navega • <kbd>Home</kbd> 2 • <kbd>End</kbd> 97 •
+        Zoom: <kbd>Ctrl</kbd>+<kbd>roda</kbd>, <kbd>+</kbd>/<kbd>-</kbd> • <kbd>0</kbd> reset • <kbd>F</kbd> ajustar • arraste para pan
+      </div>
+
+      <div class="right">
+        <span class="zoomGroup" title="Atalhos: Ctrl + roda do mouse, +/-, 0 (reset), F (fit)">
+          <span id="zoomLabel">100%</span>
+          <button id="zoomOutBtn" aria-label="Zoom -">−</button>
+          <button id="zoomInBtn" aria-label="Zoom +">+</button>
+          <button id="zoomResetBtn" title="Reset (0)">Reset</button>
+          <button id="zoomFitBtn" title="Ajustar à tela (F)">Fit</button>
+          <input id="zoomRange" type="range" min="25" max="600" step="5" value="100" />
+        </span>
+
+        <label class="checkWrap" title="Se desmarcar, aplica Fit a cada frame">
+          <input id="keepZoomChk" type="checkbox" checked />
+          manter zoom
+        </label>
+      </div>
     </div>
   </header>
 
@@ -158,11 +194,30 @@
 <script>
 (() => {
   // ======= CONFIG =======
-  const ROOT = "https://sigmameteorologia.com/produtos/wrf_produtos//";
-  const PREFIX = "wrf_mosaico_chuva_acum_total_rs_"; // + (00z|12z) + _ + idx + .png
   const EXT = ".png";
-  const MIN = 2;
-  const MAX = 97;
+
+  // Config por variável/mosaico
+  const MOSAICS = {
+    chuva: {
+      label: "WRF chuva acumulada total RS",
+      root: "https://sigmameteorologia.com/produtos/wrf_produtos//",
+      prefix: "wrf_mosaico_chuva_acum_total_rs_", // + (00z|12z) + _ + idx + .png
+      min: 2,
+      max: 97,
+      modelEnabled: false
+    },
+    tempo_severo: {
+      label: "WRF tempo severo RS",
+      rootsByModel: {
+        icon: "https://sigmameteorologia.com/produtos/wrf_icon//",
+        ecmwf: "https://sigmameteorologia.com/produtos/wrf_ecmwf//",
+      },
+      prefix: "wrf_mosaico_tempo_severo_rs_", // + (00z|12z) + _ + idx + .png
+      min: 2,
+      max: 97,
+      modelEnabled: true
+    }
+  };
 
   // Cache em memória (evita baixar de novo ao voltar).
   const CACHE_LIMIT = 18; // 12–24 costuma ser um bom equilíbrio.
@@ -173,9 +228,15 @@
   const ZOOM_STEP = 0.10;
 
   // ======= STATE =======
+  let mosaic = "chuva"; // chuva | tempo_severo
+  let model  = "icon";  // icon | ecmwf
+  let run    = "00z";   // 00z | 12z
+
+  let MIN = MOSAICS[mosaic].min;
+  let MAX = MOSAICS[mosaic].max;
   let idx = MIN;
-  let run = "00z";     // 00z ou 12z
-  let navToken = 0;    // evita “corrida” ao apertar setas muito rápido
+
+  let navToken = 0;     // evita “corrida” ao apertar setas muito rápido
 
   let zoom = 1.0;
   let naturalW = 0;
@@ -184,43 +245,82 @@
   let didInitialFit = false; // aplica Fit automaticamente ao abrir
 
   // LRU cache: key -> { img: HTMLImageElement, at: number }
-  // key = `${run}:${idx}`
+  // key = `${mosaic}:${model}:${run}:${idx}`
   const cache = new Map();
 
   // ======= ELEMENTS =======
-  const viewport = document.getElementById("viewport");
-  const imgEl = document.getElementById("img");
-  const spinner = document.getElementById("spinner");
-  const idxLabel = document.getElementById("idxLabel");
-  const maxLabel = document.getElementById("maxLabel");
-  const urlLink = document.getElementById("urlLink");
-  const statusEl = document.getElementById("status");
+  const viewport    = document.getElementById("viewport");
+  const imgEl       = document.getElementById("img");
+  const spinner     = document.getElementById("spinner");
+  const idxLabel    = document.getElementById("idxLabel");
+  const maxLabel    = document.getElementById("maxLabel");
+  const urlLink     = document.getElementById("urlLink");
+  const statusEl    = document.getElementById("status");
+  const titleStrong = document.getElementById("titleStrong");
 
-  const prevBtn = document.getElementById("prevBtn");
-  const nextBtn = document.getElementById("nextBtn");
+  const prevBtn   = document.getElementById("prevBtn");
+  const nextBtn   = document.getElementById("nextBtn");
   const gotoInput = document.getElementById("gotoInput");
-  const gotoBtn = document.getElementById("gotoBtn");
+  const gotoBtn   = document.getElementById("gotoBtn");
+
   const prefetchInput = document.getElementById("prefetchInput");
-  const runSelect = document.getElementById("runSelect");
+  const runSelect      = document.getElementById("runSelect");
+  const mosaicSelect   = document.getElementById("mosaicSelect");
+  const modelSelect    = document.getElementById("modelSelect");
+  const modelWrap      = document.getElementById("modelWrap");
+  const modelSep       = document.getElementById("modelSep");
 
-  // Zoom UI
-  const zoomRange = document.getElementById("zoomRange");
-  const zoomLabel = document.getElementById("zoomLabel");
-  const zoomInBtn = document.getElementById("zoomInBtn");
-  const zoomOutBtn = document.getElementById("zoomOutBtn");
+  const clearCacheBtn  = document.getElementById("clearCacheBtn");
+
+  // Zoom UI (realocado)
+  const zoomRange    = document.getElementById("zoomRange");
+  const zoomLabel    = document.getElementById("zoomLabel");
+  const zoomInBtn    = document.getElementById("zoomInBtn");
+  const zoomOutBtn   = document.getElementById("zoomOutBtn");
   const zoomResetBtn = document.getElementById("zoomResetBtn");
-  const zoomFitBtn = document.getElementById("zoomFitBtn");
+  const zoomFitBtn   = document.getElementById("zoomFitBtn");
+  const keepZoomChk  = document.getElementById("keepZoomChk");
 
-  maxLabel.textContent = String(MAX);
-  gotoInput.max = String(MAX);
-
-  function makeUrl(n) {
-    return `${ROOT}${PREFIX}${run}_${n}${EXT}`;
-  }
   function clamp(n) { return Math.min(MAX, Math.max(MIN, n)); }
   function clampZoom(z) { return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)); }
   function setStatus(text) { statusEl.textContent = text ? `| ${text}` : ""; }
   function showSpinner(on) { spinner.style.display = on ? "" : "none"; }
+
+  function currentCfg() { return MOSAICS[mosaic]; }
+
+  function currentRoot() {
+    const cfg = currentCfg();
+    if (cfg.rootsByModel) return cfg.rootsByModel[model] || cfg.rootsByModel.icon;
+    return cfg.root;
+  }
+
+  function makeUrl(n) {
+    const cfg = currentCfg();
+    return `${currentRoot()}${cfg.prefix}${run}_${n}${EXT}`;
+  }
+
+  function syncBoundsFromCfg() {
+    const cfg = currentCfg();
+    MIN = cfg.min;
+    MAX = cfg.max;
+
+    maxLabel.textContent = String(MAX);
+    gotoInput.min = String(MIN);
+    gotoInput.max = String(MAX);
+  }
+
+  function syncTitleAndModelUI() {
+    const cfg = currentCfg();
+    titleStrong.textContent = cfg.label;
+
+    // Para chuva, não mostra o seletor de modelo (não é necessário)
+    const showModel = !!cfg.modelEnabled;
+    modelWrap.style.display = showModel ? "" : "none";
+    modelSep.style.display  = showModel ? "" : "none";
+
+    // Tooltip mantém o significado das siglas sem ocupar espaço
+    modelSelect.title = "ICON = Icosahedral Nonhydrostatic • ECMWF = European Centre for Medium-Range Weather Forecasts";
+  }
 
   // ======= LRU CACHE =======
   function touchCache(key, entry) {
@@ -231,8 +331,9 @@
       cache.delete(oldestKey);
     }
   }
+
   function getCached(n) {
-    const key = `${run}:${n}`;
+    const key = `${mosaic}:${model}:${run}:${n}`;
     const entry = cache.get(key);
     if (!entry) return null;
     touchCache(key, entry);
@@ -260,7 +361,7 @@
       try { await im.decode(); } catch (_) {}
     }
 
-    const key = `${run}:${n}`;
+    const key = `${mosaic}:${model}:${run}:${n}`;
     touchCache(key, { img: im, at: Date.now() });
     return im;
   }
@@ -277,28 +378,25 @@
   function applyZoom(keepCenter = true) {
     if (!naturalW || !naturalH) return;
 
-    const z = clampZoom(zoom);
-    zoom = z;
+    zoom = clampZoom(zoom);
 
     const w = Math.round(naturalW * zoom);
     const h = Math.round(naturalH * zoom);
 
-    // mantém o "centro" aproximado do viewport ao mudar zoom
     let cx = 0, cy = 0;
     if (keepCenter) {
       cx = viewport.scrollLeft + viewport.clientWidth / 2;
       cy = viewport.scrollTop + viewport.clientHeight / 2;
+
       const prevW = imgEl.offsetWidth || w;
       const prevH = imgEl.offsetHeight || h;
 
-      // proporção do centro em relação ao tamanho anterior
       const rx = prevW ? (cx / prevW) : 0.5;
       const ry = prevH ? (cy / prevH) : 0.5;
 
       imgEl.style.width = w + "px";
       imgEl.style.height = h + "px";
 
-      // reposiciona para manter o centro
       viewport.scrollLeft = Math.max(0, Math.round(rx * w - viewport.clientWidth / 2));
       viewport.scrollTop  = Math.max(0, Math.round(ry * h - viewport.clientHeight / 2));
     } else {
@@ -312,16 +410,13 @@
 
   function fitToViewport() {
     if (!naturalW || !naturalH) return;
-    // espaço disponível no viewport (um respiro)
     const pad = 16;
     const vw = Math.max(1, viewport.clientWidth - pad);
     const vh = Math.max(1, viewport.clientHeight - pad);
 
-    const z = Math.min(vw / naturalW, vh / naturalH);
-    zoom = clampZoom(z);
+    zoom = clampZoom(Math.min(vw / naturalW, vh / naturalH));
     applyZoom(false);
 
-    // rola para o topo/esquerda (começo) após fit (opcional)
     viewport.scrollLeft = 0;
     viewport.scrollTop = 0;
   }
@@ -338,29 +433,34 @@
       const im = await loadImage(idx, { priority: "high" });
       if (myToken !== navToken) return;
 
-      // atualiza dimensões naturais e aplica zoom antes/na troca
       naturalW = im.naturalWidth || naturalW;
       naturalH = im.naturalHeight || naturalH;
 
       imgEl.src = im.src;
-      if (!didInitialFit) {
+
+      // Comportamento do “manter zoom”
+      if (!keepZoomChk.checked) {
+        fitToViewport();
+        didInitialFit = true; // já está “ajustado”
+      } else if (!didInitialFit) {
         fitToViewport();
         didInitialFit = true;
       } else {
         applyZoom(false);
       }
-showSpinner(false);
+
+      showSpinner(false);
       setStatus("");
 
       schedulePrefetch();
     } catch (e) {
       if (myToken !== navToken) return;
       showSpinner(false);
-      setStatus("erro ao carregar (imagem pode não existir ou hotlink bloqueado)");
+      setStatus("erro ao carregar (imagem pode não existir)");
     }
   }
 
-  // Prefetch leve do(s) próximo(s) (não é preload total)
+  // Prefetch leve do(s) próximo(s)
   function schedulePrefetch() {
     const k = Math.min(12, Math.max(0, parseInt(prefetchInput.value, 10) || 0));
     if (k <= 0) return;
@@ -370,7 +470,7 @@ showSpinner(false);
 
     const job = async () => {
       for (let n = start; n <= end; n++) {
-        const key = `${run}:${n}`;
+        const key = `${mosaic}:${model}:${run}:${n}`;
         if (cache.has(key)) continue;
         try { await loadImage(n, { priority: "low" }); } catch (_) {}
       }
@@ -398,12 +498,42 @@ showSpinner(false);
     if (e.key === "Enter") goToValue();
   });
 
-  // Troca 00z/12z: limpa cache e recarrega o frame atual
+  function resetNavigationContext({ keepIdx = true } = {}) {
+    cache.clear();
+    navToken++;        // cancela render em andamento
+    didInitialFit = false;
+    idx = keepIdx ? clamp(idx) : MIN;
+  }
+
+  // Limpar cache (botão)
+  clearCacheBtn.addEventListener("click", () => {
+    cache.clear();
+    setStatus("cache limpo");
+    // some a mensagem depois de um tempinho
+    setTimeout(() => setStatus(""), 900);
+  });
+
+  // Troca variável/mosaico
+  mosaicSelect.addEventListener("change", () => {
+    mosaic = mosaicSelect.value;
+    syncBoundsFromCfg();
+    syncTitleAndModelUI();
+    resetNavigationContext({ keepIdx: true });
+    render(idx);
+  });
+
+  // Troca modelo (ICON/ECMWF)
+  modelSelect.addEventListener("change", () => {
+    model = modelSelect.value;
+    resetNavigationContext({ keepIdx: true });
+    render(idx);
+  });
+
+  // Troca 00z/12z
   runSelect.addEventListener("change", () => {
-    run = runSelect.value;   // "00z" ou "12z"
-    cache.clear();           // evita misturar cache de rodadas diferentes
-    navToken++;              // cancela render em andamento
-    render(idx);             // mantém o mesmo frame; se quiser sempre voltar pro 1: render(MIN)
+    run = runSelect.value;
+    resetNavigationContext({ keepIdx: true });
+    render(idx);
   });
 
   // ======= ZOOM CONTROLS =======
@@ -429,12 +559,11 @@ showSpinner(false);
 
   zoomFitBtn.addEventListener("click", fitToViewport);
 
-  // Ctrl + roda do mouse para zoom (evita atrapalhar scroll normal)
+  // Ctrl + roda do mouse para zoom
   viewport.addEventListener("wheel", (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
     const dir = Math.sign(e.deltaY);
-    // deltaY > 0 = zoom out
     const factor = dir > 0 ? -ZOOM_STEP : ZOOM_STEP;
     zoomBy(factor);
   }, { passive: false });
@@ -444,7 +573,6 @@ showSpinner(false);
   let dragStartX = 0, dragStartY = 0, startScrollLeft = 0, startScrollTop = 0;
 
   viewport.addEventListener("mousedown", (e) => {
-    // botão esquerdo
     if (e.button !== 0) return;
     dragging = true;
     viewport.classList.add("dragging");
@@ -483,16 +611,19 @@ showSpinner(false);
     else if (e.key === "f" || e.key === "F") { e.preventDefault(); fitToViewport(); }
   });
 
-  // Recalcula fit (se quiser) quando redimensiona a janela mantendo o zoom atual
   window.addEventListener("resize", () => {
-    // só atualiza tamanho com o zoom atual
     applyZoom(false);
   });
 
   // ======= INIT =======
-  runSelect.value = run;
+  mosaicSelect.value = mosaic;
+  modelSelect.value  = model;
+  runSelect.value    = run;
+
+  syncBoundsFromCfg();
+  syncTitleAndModelUI();
   updateHeader();
-  // começa na imagem 2
+
   render(MIN);
 })();
 </script>
