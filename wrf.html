@@ -92,7 +92,16 @@
 <body>
 <header>
   <div class="bar">
-    <strong>WRF chuva acumulada total RS</strong>
+    <strong id="varTitle">WRF chuva acumulada total RS</strong>
+
+    <span class="muted">|</span>
+    <label>
+      variável:
+      <select id="varSelect" title="Seleciona a variável">
+        <option value="rain">Chuva acumulada</option>
+        <option value="maxdbz">Refletividade Máxima</option>
+      </select>
+    </label>
 
     <span class="muted">|</span>
     <label>
@@ -185,8 +194,12 @@
     icon:  "https://sigmameteorologia.com/produtos/wrf_icon//"
   };
 
-  const PREFIX = "wrf_chuva_acum_total_rs_"; // + (00z|12z) + _ + frame + .png
-  const EXT = ".png";
+const VARS = {
+  rain:  { prefix: "wrf_chuva_acum_total_rs_", title: "WRF chuva acumulada total RS" },
+  maxdbz:{ prefix: "wrf_maxdbz_rs_",          title: "WRF refletividade máxima RS" }
+};
+
+const EXT = ".png";
 
   // Cache em memória (LRU)
   const CACHE_LIMIT = 24;
@@ -199,6 +212,7 @@
   let idx = MIN;
   let run = "00z";
   let model = "ecmwf";
+  let variable = "rain";
   let navToken = 0;
 
   // Pan/zoom transform
@@ -212,7 +226,7 @@
   let dragStartTx = 0, dragStartTy = 0;
 
   // LRU cache: key -> { img: HTMLImageElement, at: number }
-  // key = `${model}|${run}|${idx}`
+  // key = `${model}|${run}|${variable}|${idx}`
   const cache = new Map();
 
   // ======= ELEMENTS =======
@@ -233,6 +247,8 @@
 
   const runSelect = document.getElementById("runSelect");
   const modelSelect = document.getElementById("modelSelect");
+  const varSelect = document.getElementById("varSelect");
+  const varTitle = document.getElementById("varTitle");
 
   const zoomPct = document.getElementById("zoomPct");
   const zoomRange = document.getElementById("zoomRange");
@@ -254,8 +270,15 @@
 
   function makeUrl(n){
     const root = MODEL_ROOT[model] || MODEL_ROOT.ecmwf;
-    return `${root}${PREFIX}${run}_${n}${EXT}`;
+    const v = VARS[variable] || VARS.rain;
+    return `${root}${v.prefix}${run}_${n}${EXT}`;
   }
+
+  function updateVarTitle(){
+    const v = VARS[variable] || VARS.rain;
+    if (varTitle) varTitle.textContent = v.title;
+  }
+
 
   // ======= CACHE (LRU) =======
   function touchCache(key, entry){
@@ -267,7 +290,7 @@
     }
   }
   function getCached(n){
-    const key = `${model}|${run}|${n}`;
+    const key = `${model}|${run}|${variable}|${n}`;
     const entry = cache.get(key);
     if (!entry) return null;
     touchCache(key, entry);
@@ -294,7 +317,7 @@
       try { await im.decode(); } catch(_){}
     }
 
-    const key = `${model}|${run}|${n}`;
+    const key = `${model}|${run}|${variable}|${n}`;
     touchCache(key, { img: im, at: Date.now() });
     return im;
   }
@@ -464,12 +487,13 @@
     const end = Math.min(MAX, idx + k);
     const currentModel = model;
     const currentRun = run;
+    const currentVar = variable;
 
     const job = async () => {
       for (let n = start; n <= end; n++){
         // se usuário trocar run/model no meio, para pra não desperdiçar
-        if (model !== currentModel || run !== currentRun) return;
-        const key = `${model}|${run}|${n}`;
+        if (model !== currentModel || run !== currentRun || variable !== currentVar) return;
+        const key = `${model}|${run}|${variable}|${n}`;
         if (cache.has(key)) continue;
         try { await loadImage(n, { priority: "low" }); } catch(_){}
       }
@@ -519,6 +543,15 @@
     render(idx, { forceResetZoom: false });
   });
 
+
+  varSelect.addEventListener("change", () => {
+    variable = varSelect.value;
+    navToken++;
+    cache.clear();
+    updateVarTitle();
+    render(idx, { forceResetZoom: false });
+  });
+
   // Teclado (inclui zoom)
   window.addEventListener("keydown", (e) => {
     const tag = (document.activeElement?.tagName || "").toLowerCase();
@@ -546,6 +579,8 @@
   // ======= INIT =======
   modelSelect.value = model;
   runSelect.value = run;
+  varSelect.value = variable;
+  updateVarTitle();
 
   idx = MIN;
   gotoInput.value = String(MIN);
