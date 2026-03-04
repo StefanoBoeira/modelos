@@ -142,7 +142,7 @@
     </label>
 
     <span class="muted">|</span>
-    <button id="clearCacheBtn" title="Limpa o cache em memória">Limpar cache</button>
+    <button id="clearCacheBtn" title="Força recarregar as imagens ignorando o cache do navegador/CDN">Limpar cache</button>
   </div>
 
   <div class="bar muted hintZoomRow" style="margin-top:8px">
@@ -215,6 +215,21 @@ const EXT = ".png";
   let variable = "rain";
   let navToken = 0;
 
+
+  // Cache-buster para ignorar cache do navegador/CDN ao trocar seleções
+  let cacheBust = Date.now().toString(36);
+  function bumpCacheBust(){
+    cacheBust = Date.now().toString(36);
+  }
+
+
+  // Tenta limpar Cache Storage (PWA/service worker), se existir
+  function clearBrowserCaches(){
+    if (!("caches" in window)) return;
+    try{
+      caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).catch(()=>{});
+    }catch(_){ }
+  }
   // Pan/zoom transform
   let scale = 1;
   let tx = 0;
@@ -268,10 +283,16 @@ const EXT = ".png";
   function setStatus(text) { statusEl.textContent = text ? `| ${text}` : ""; }
   function showSpinner(on) { spinner.style.display = on ? "" : "none"; }
 
-  function makeUrl(n){
+  function makeUrlBase(n){
     const root = MODEL_ROOT[model] || MODEL_ROOT.ecmwf;
     const v = VARS[variable] || VARS.rain;
     return `${root}${v.prefix}${run}_${n}${EXT}`;
+  }
+
+  function makeUrl(n){
+    const base = makeUrlBase(n);
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}v=${cacheBust}`;
   }
 
   function updateVarTitle(){
@@ -482,10 +503,11 @@ function constrainPan(){
     idxLabel.textContent = String(idx);
     gotoInput.value = String(idx);
 
+    const urlBase = makeUrlBase(idx);
     const url = makeUrl(idx);
-    urlLink.textContent = url;
+    urlLink.textContent = urlBase;
     urlLink.href = url;
-  }
+}
 
   // ======= RENDER =======
   async function render(targetIdx, { forceResetZoom = false } = {}){
@@ -570,15 +592,16 @@ function constrainPan(){
 
   clearCacheBtn.addEventListener("click", () => {
     cache.clear();
-    setStatus("cache limpo");
-    setTimeout(() => setStatus(""), 800);
+    bumpCacheBust();
+    clearBrowserCaches();
+    render(idx, { forceResetZoom: false });
   });
-
-  // Trocas de modelo/rodada
+// Trocas de modelo/rodada
   modelSelect.addEventListener("change", () => {
     model = modelSelect.value;
     navToken++;
     cache.clear(); // evita consumir RAM com outro conjunto; pode remover se quiser manter
+    bumpCacheBust();
     render(idx, { forceResetZoom: false });
   });
 
@@ -586,6 +609,8 @@ function constrainPan(){
     run = runSelect.value;
     navToken++;
     cache.clear();
+    bumpCacheBust();
+    clearBrowserCaches();
     render(idx, { forceResetZoom: false });
   });
 
@@ -594,6 +619,7 @@ function constrainPan(){
     variable = varSelect.value;
     navToken++;
     cache.clear();
+    bumpCacheBust();
     updateVarTitle();
     render(idx, { forceResetZoom: false });
   });
