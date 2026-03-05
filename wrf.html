@@ -202,7 +202,10 @@ const VARS = {
 const EXT = ".png";
 
   // Cache em memória (LRU)
-  const CACHE_LIMIT = 24;
+  // Ajusta automaticamente pelo deviceMemory (quando disponível) para equilibrar desempenho x RAM.
+  const DEVICE_MEM_GB = navigator.deviceMemory || 4;
+  const CACHE_LIMIT = Math.min(48, Math.max(24, Math.round(DEVICE_MEM_GB * 6))); // 4GB→24 | 8GB→48 (cap)
+  const WARM_CACHE_LIMIT = Math.min(36, Math.max(12, Math.round(CACHE_LIMIT * 0.7)));
 
   // Zoom limits
   const ZOOM_MIN = 0.3;
@@ -216,19 +219,12 @@ const EXT = ".png";
   let navToken = 0;
 
 
-  // Cache-busting robusto: timestamp por requisição (evita imagens antigas mesmo com .png sobrescritos)
-  let reqSeq = 0;
-  const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutos (reduza/aumente se quiser mais/menos agressivo)
-
-  function makeTimestamp(){
-    // ms + contador garante unicidade mesmo no mesmo milissegundo
-    return `${Date.now()}_${++reqSeq}`;
-  }
-
-  // Mantido por compatibilidade com a lógica anterior
+  // Cache-buster para ignorar cache do navegador/CDN ao trocar seleções
+  let cacheBust = Date.now().toString(36);
   function bumpCacheBust(){
-    reqSeq++;
+    cacheBust = Date.now().toString(36);
   }
+
 
   // Tenta limpar Cache Storage (PWA/service worker), se existir
   function clearBrowserCaches(){
@@ -250,6 +246,8 @@ const EXT = ".png";
   // LRU cache: key -> { img: HTMLImageElement, at: number }
   // key = `${model}|${run}|${variable}|${idx}`
   const cache = new Map();
+  const warmCache = new Map(); // prefetch (não deve “expulsar” as imagens já vistas)
+  const inflight = new Map(); // key -> Promise<HTMLImageElement>
 
   // ======= ELEMENTS =======
   const viewport = document.getElementById("viewport");
@@ -299,7 +297,7 @@ const EXT = ".png";
   function makeUrl(n){
     const base = makeUrlBase(n);
     const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}t=${makeTimestamp()}`;
+    return `${base}${sep}v=${cacheBust}`;
   }
 
   function updateVarTitle(){
@@ -317,44 +315,99 @@ const EXT = ".png";
       cache.delete(oldestKey);
     }
   }
-  function getCached(n){
-    const key = `${model}|${run}|${variable}|${n}`;
-    const entry = cache.get(key);
-    if (!entry) return null;
+  function touchWarm(key, entry){
+    warmCache.delete(key);
+    warmCache.set(key, entry);
+    while (warmCache.size > WARM_CACHE_LIMIT){
+      const oldestKey = warmCache.keys().next().value;
+      warmCache.delete(oldestKey);
+    }
+  }
 
-    // Expira rápido para evitar “grudar” imagens antigas quando o servidor atualiza o mesmo nome de arquivo
-    if (Date.now() - entry.at > CACHE_TTL_MS){
-      cache.delete(key);
-      return null;
+  function getCachedForDisplay(n){
+    const key = `${model}|${run}|${variable}|${n}`;
+
+    const main = cache.get(key);
+    if (main){
+      touchCache(key, main);
+      return main.img;
     }
 
-    touchCache(key, entry);
-    return entry.img;
-  }async function loadImage(n, {priority="high"} = {}){
-    const cached = getCached(n);
+    const warm = warmCache.get(key);
+    if (warm){
+      // Promove do warm-cache para o cache principal ao visualizar
+      warmCache.delete(key);
+      touchCache(key, warm);
+      return warm.img;
+    }
+
+    return null;
+  }
+
+  function getCachedAny(n){
+    const key = `${model}|${run}|${variable}|${n}`;
+    return (cache.get(key)?.img) || (warmCache.get(key)?.img) || null;
+  }
+
+  async function loadImage(n, { priority = "high", kind = "display" } = {}){
+    // kind: "display" | "prefetch"
+    const cached = (kind === "display") ? getCachedForDisplay(n) : getCachedAny(n);
     if (cached) return cached;
 
-    const url = makeUrl(n);
-    const im = new Image();
-    im.decoding = "async";
-    try { im.fetchPriority = priority; } catch(_){}
+    const ctxModel = model;
+    const ctxRun = run;
+    const ctxVar = variable;
+    const ctxBust = cacheBust;
 
-    const p = new Promise((resolve, reject) => {
-      im.onload = resolve;
-      im.onerror = reject;
-      im.src = url;
-    });
+    const key = `${ctxModel}|${ctxRun}|${ctxVar}|${n}`;
 
-    await p;
+    // Evita downloads duplicados (render + prefetch ao mesmo tempo)
+    let task = inflight.get(key);
+    if (!task){
+      const url = makeUrl(n);
+      task = (async () => {
+        const im = new Image();
+        im.decoding = "async";
+        try { im.fetchPriority = priority; } catch(_){}
 
-    if (im.decode){
-      try { await im.decode(); } catch(_){}
+        await new Promise((resolve, reject) => {
+          im.onload = resolve;
+          im.onerror = reject;
+          im.src = url;
+        });
+
+        if (im.decode){
+          try { await im.decode(); } catch(_){}
+        }
+
+        return im;
+      })();
+
+      inflight.set(key, task);
+      task.finally(() => { inflight.delete(key); });
     }
 
-    const key = `${model}|${run}|${variable}|${n}`;
-    touchCache(key, { img: im, at: Date.now() });
+    const im = await task;
+
+    // Se o usuário trocou seleção/rodada no meio do carregamento, não contamina cache.
+    if (ctxModel !== model || ctxRun !== run || ctxVar !== variable || ctxBust !== cacheBust) {
+      return im;
+    }
+
+    const entry = { img: im, at: Date.now() };
+    if (kind === "prefetch"){
+      touchWarm(key, entry);
+    } else {
+      touchCache(key, entry);
+    }
+
+    // Se veio de prefetch e agora é display, garante promoção
+    if (kind === "display"){
+      return getCachedForDisplay(n) || im;
+    }
     return im;
   }
+
 
   // ======= PAN/ZOOM =======
 function canPan(){
@@ -517,10 +570,9 @@ function constrainPan(){
     gotoInput.value = String(idx);
 
     const urlBase = makeUrlBase(idx);
-    const url = makeUrl(idx);
     urlLink.textContent = urlBase;
-    urlLink.href = url;
-}
+    urlLink.href = urlBase;
+  }
 
   // ======= RENDER =======
   async function render(targetIdx, { forceResetZoom = false } = {}){
@@ -532,7 +584,7 @@ function constrainPan(){
     setStatus("carregando…");
 
     try{
-      const im = await loadImage(idx, { priority: "high" });
+      const im = await loadImage(idx, { priority: "high", kind: "display" });
       if (myToken !== navToken) return;
 
       imgEl.src = im.src;
@@ -558,34 +610,102 @@ function constrainPan(){
     }
   }
 
-  // Prefetch leve do(s) próximo(s)
+  // Prefetch (janela ao redor do frame atual) — otimiza avanço e retorno.
+  // Estratégia:
+  //  - Prefetch vai para um warm-cache separado (não expulsa o que você já viu).
+  //  - Fila com concorrência limitada (evita travar a rede/UI).
+  //  - Pré-carrega para frente e para trás (alternando), para navegação instantânea.
+
+  let prefetchJobId = 0;
+  let prefetchQueue = [];
+  let prefetchSet = new Set();
+  let prefetchActive = 0;
+
+  function connType(){
+    const c = navigator.connection;
+    return c?.effectiveType || "";
+  }
+
+  function effectivePrefetchK(rawK){
+    const c = navigator.connection;
+    if (c?.saveData) return 0;
+    const t = connType();
+    if (t === "slow-2g" || t === "2g") return Math.min(2, rawK);
+    if (t === "3g") return Math.min(4, rawK);
+    return rawK;
+  }
+
+  function prefetchConcurrency(){
+    const c = navigator.connection;
+    if (c?.saveData) return 1;
+    const t = connType();
+    if (t === "slow-2g" || t === "2g") return 1;
+    if (t === "3g") return 2;
+    if (t === "4g") return 4;
+    return 3;
+  }
+
+  function enqueuePrefetch(n){
+    if (n < MIN || n > MAX) return;
+    if (prefetchSet.has(n)) return;
+
+    const key = `${model}|${run}|${variable}|${n}`;
+    if (cache.has(key) || warmCache.has(key) || inflight.has(key)) return;
+
+    prefetchSet.add(n);
+    prefetchQueue.push(n);
+  }
+
+  function runPrefetch(jobId){
+    if (jobId !== prefetchJobId) return;
+
+    const maxConc = prefetchConcurrency();
+    while (prefetchActive < maxConc && prefetchQueue.length){
+      const n = prefetchQueue.shift();
+      prefetchSet.delete(n);
+
+      const key = `${model}|${run}|${variable}|${n}`;
+      if (cache.has(key) || warmCache.has(key) || inflight.has(key)) continue;
+
+      prefetchActive++;
+      loadImage(n, { priority: "low", kind: "prefetch" })
+        .catch(() => {})
+        .finally(() => {
+          prefetchActive--;
+          // continua drenando a fila, mas sem “jank”
+          if (jobId !== prefetchJobId) return;
+          if ("requestIdleCallback" in window) {
+            requestIdleCallback(() => runPrefetch(jobId), { timeout: 800 });
+          } else {
+            setTimeout(() => runPrefetch(jobId), 0);
+          }
+        });
+    }
+  }
+
   function schedulePrefetch(){
     const kRaw = parseInt(prefetchInput.value, 10);
-    const k = Math.max(0, Math.min(12, isNaN(kRaw) ? 0 : kRaw));
+    const k0 = Math.max(0, Math.min(12, isNaN(kRaw) ? 0 : kRaw));
+    const k = effectivePrefetchK(k0);
+
+    // cancela fila anterior
+    prefetchJobId++;
+    prefetchQueue = [];
+    prefetchSet.clear();
+
     if (k <= 0) return;
 
-    const start = idx + 1;
-    const end = Math.min(MAX, idx + k);
-    const currentModel = model;
-    const currentRun = run;
-    const currentVar = variable;
+    // Ordem: +1, -1, +2, -2... (bom para navegar em qualquer direção)
+    for (let d = 1; d <= k; d++){
+      enqueuePrefetch(idx + d);
+      enqueuePrefetch(idx - d);
+    }
 
-    const job = async () => {
-      for (let n = start; n <= end; n++){
-        // se usuário trocar run/model no meio, para pra não desperdiçar
-        if (model !== currentModel || run !== currentRun || variable !== currentVar) return;
-        const key = `${model}|${run}|${variable}|${n}`;
-        const entry = cache.get(key);
-        if (entry && (Date.now() - entry.at <= CACHE_TTL_MS)) continue;
-        if (entry) cache.delete(key);
-        try { await loadImage(n, { priority: "low" }); } catch(_){}
-      }
-    };
-
+    const myJob = prefetchJobId;
     if ("requestIdleCallback" in window) {
-      requestIdleCallback(() => job(), { timeout: 800 });
+      requestIdleCallback(() => runPrefetch(myJob), { timeout: 800 });
     } else {
-      setTimeout(job, 60);
+      setTimeout(() => runPrefetch(myJob), 60);
     }
   }
 
@@ -607,6 +727,8 @@ function constrainPan(){
 
   clearCacheBtn.addEventListener("click", () => {
     cache.clear();
+    warmCache.clear();
+    inflight.clear();
     bumpCacheBust();
     clearBrowserCaches();
     render(idx, { forceResetZoom: false });
@@ -615,7 +737,9 @@ function constrainPan(){
   modelSelect.addEventListener("change", () => {
     model = modelSelect.value;
     navToken++;
-    cache.clear(); // evita consumir RAM com outro conjunto; pode remover se quiser manter
+    cache.clear();
+    warmCache.clear();
+    inflight.clear(); // evita consumir RAM com outro conjunto; pode remover se quiser manter
     bumpCacheBust();
     render(idx, { forceResetZoom: false });
   });
@@ -624,6 +748,8 @@ function constrainPan(){
     run = runSelect.value;
     navToken++;
     cache.clear();
+    warmCache.clear();
+    inflight.clear();
     bumpCacheBust();
     clearBrowserCaches();
     render(idx, { forceResetZoom: false });
@@ -634,6 +760,8 @@ function constrainPan(){
     variable = varSelect.value;
     navToken++;
     cache.clear();
+    warmCache.clear();
+    inflight.clear();
     bumpCacheBust();
     updateVarTitle();
     render(idx, { forceResetZoom: false });
