@@ -136,7 +136,7 @@
     <button id="gotoBtn">OK</button>
 
     <span class="muted">|</span>
-    <label title="0 = desliga. 1–12 (prefetch leve; 3–6 recomendado).">
+    <label title="0 = desliga. 1–12 (prefetch adaptativo; 3–4 recomendado).">
       prefetch próximo:
       <input id="prefetchInput" type="number" min="0" max="12" step="1" value="6" style="width:70px" />
     </label>
@@ -217,13 +217,33 @@ const EXT = ".png";
   let model = "ecmwf";
   let variable = "rain";
   let navToken = 0;
+  let lastNavDir = 1;
 
 
-  // Cache-buster para ignorar cache do navegador/CDN ao trocar seleções
-  let cacheBust = Date.now().toString(36);
-  function bumpCacheBust(){
-    cacheBust = Date.now().toString(36);
+  // Timestamp por contexto: mantém a plataforma rápida dentro da mesma navegação,
+  // mas força uma nova versão ao trocar rodada/modelo/variável ou ao limpar o cache.
+  const CACHE_BUST_TTL_MS = 90 * 1000;
+  let cacheBustAt = 0;
+  let cacheBust = "";
+
+  function makeBust(ts = Date.now()){
+    return ts.toString(36);
   }
+
+  function ensureCacheBust(force = false){
+    const now = Date.now();
+    if (force || !cacheBust || (now - cacheBustAt) > CACHE_BUST_TTL_MS){
+      cacheBust = makeBust(now);
+      cacheBustAt = now;
+    }
+    return cacheBust;
+  }
+
+  function bumpCacheBust(){
+    return ensureCacheBust(true);
+  }
+
+  ensureCacheBust(true);
 
 
   // Tenta limpar Cache Storage (PWA/service worker), se existir
@@ -294,10 +314,14 @@ const EXT = ".png";
     return `${root}${v.prefix}${run}_${n}${EXT}`;
   }
 
-  function makeUrl(n){
+  function makeUrl(n, bust = ensureCacheBust()){
     const base = makeUrlBase(n);
     const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}v=${cacheBust}`;
+    return `${base}${sep}t=${bust}`;
+  }
+
+  function makeFrameKey(n, ctxModel = model, ctxRun = run, ctxVar = variable, bust = ensureCacheBust()){
+    return `${bust}|${ctxModel}|${ctxRun}|${ctxVar}|${n}`;
   }
 
   function updateVarTitle(){
@@ -325,7 +349,7 @@ const EXT = ".png";
   }
 
   function getCachedForDisplay(n){
-    const key = `${model}|${run}|${variable}|${n}`;
+    const key = makeFrameKey(n);
 
     const main = cache.get(key);
     if (main){
@@ -345,7 +369,7 @@ const EXT = ".png";
   }
 
   function getCachedAny(n){
-    const key = `${model}|${run}|${variable}|${n}`;
+    const key = makeFrameKey(n);
     return (cache.get(key)?.img) || (warmCache.get(key)?.img) || null;
   }
 
@@ -357,14 +381,14 @@ const EXT = ".png";
     const ctxModel = model;
     const ctxRun = run;
     const ctxVar = variable;
-    const ctxBust = cacheBust;
+    const ctxBust = ensureCacheBust();
 
-    const key = `${ctxModel}|${ctxRun}|${ctxVar}|${n}`;
+    const key = makeFrameKey(n, ctxModel, ctxRun, ctxVar, ctxBust);
 
     // Evita downloads duplicados (render + prefetch ao mesmo tempo)
     let task = inflight.get(key);
     if (!task){
-      const url = makeUrl(n);
+      const url = makeUrl(n, ctxBust);
       task = (async () => {
         const im = new Image();
         im.decoding = "async";
@@ -577,8 +601,27 @@ function constrainPan(){
   // ======= RENDER =======
   async function render(targetIdx, { forceResetZoom = false } = {}){
     const myToken = ++navToken;
-    idx = clamp(targetIdx);
+    const nextIdx = clamp(targetIdx);
+    const dir = Math.sign(nextIdx - idx);
+    if (dir) lastNavDir = dir;
+    idx = nextIdx;
     updateHeader();
+
+    const cachedNow = getCachedForDisplay(idx);
+    if (cachedNow){
+      imgEl.src = cachedNow.src;
+      requestAnimationFrame(() => {
+        if (forceResetZoom || !keepZoomChk.checked){
+          fitToViewport();
+        } else {
+          applyTransform();
+        }
+      });
+      showSpinner(false);
+      setStatus("");
+      schedulePrefetch();
+      return;
+    }
 
     showSpinner(true);
     setStatus("carregando…");
@@ -649,7 +692,7 @@ function constrainPan(){
     if (n < MIN || n > MAX) return;
     if (prefetchSet.has(n)) return;
 
-    const key = `${model}|${run}|${variable}|${n}`;
+    const key = makeFrameKey(n);
     if (cache.has(key) || warmCache.has(key) || inflight.has(key)) return;
 
     prefetchSet.add(n);
@@ -664,7 +707,7 @@ function constrainPan(){
       const n = prefetchQueue.shift();
       prefetchSet.delete(n);
 
-      const key = `${model}|${run}|${variable}|${n}`;
+      const key = makeFrameKey(n);
       if (cache.has(key) || warmCache.has(key) || inflight.has(key)) continue;
 
       prefetchActive++;
@@ -697,8 +740,13 @@ function constrainPan(){
 
     // Ordem: +1, -1, +2, -2... (bom para navegar em qualquer direção)
     for (let d = 1; d <= k; d++){
-      enqueuePrefetch(idx + d);
-      enqueuePrefetch(idx - d);
+      if (lastNavDir < 0){
+        enqueuePrefetch(idx - d);
+        enqueuePrefetch(idx + d);
+      } else {
+        enqueuePrefetch(idx + d);
+        enqueuePrefetch(idx - d);
+      }
     }
 
     const myJob = prefetchJobId;
@@ -751,7 +799,6 @@ function constrainPan(){
     warmCache.clear();
     inflight.clear();
     bumpCacheBust();
-    clearBrowserCaches();
     render(idx, { forceResetZoom: false });
   });
 

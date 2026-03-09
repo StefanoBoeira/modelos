@@ -249,15 +249,37 @@
   let idx = MIN;
 
   let navToken = 0;     // evita “corrida” ao apertar setas muito rápido
+  let lastNavDir = 1;
 
-  // Cache-busting: força buscar imagens mais recentes mesmo que o .png seja sobrescrito no servidor/CDN
-  const makeBust = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  let cacheBust = makeBust();
-  function bumpCacheBust() { cacheBust = makeBust(); }
-  function withBust(url) {
-    const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}v=${cacheBust}`;
+  // Timestamp por contexto: mantém a navegação rápida dentro da mesma sessão,
+  // mas troca a versão ao mudar rodada/modelo/mosaico ou ao limpar o cache.
+  const CACHE_BUST_TTL_MS = 90 * 1000;
+  let cacheBustAt = 0;
+  let cacheBust = "";
+
+  function makeBust(ts = Date.now()) {
+    return ts.toString(36);
   }
+
+  function ensureCacheBust(force = false) {
+    const now = Date.now();
+    if (force || !cacheBust || (now - cacheBustAt) > CACHE_BUST_TTL_MS) {
+      cacheBust = makeBust(now);
+      cacheBustAt = now;
+    }
+    return cacheBust;
+  }
+
+  function bumpCacheBust() {
+    return ensureCacheBust(true);
+  }
+
+  function withBust(url, bust = ensureCacheBust()) {
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}t=${bust}`;
+  }
+
+  ensureCacheBust(true);
 
   let zoom = 1.0;
   let naturalW = 0;
@@ -322,8 +344,12 @@
     return `${currentRoot()}${cfg.prefix}${run}_${n}${EXT}`;
   }
 
-  function makeUrl(n) {
-    return withBust(makeUrlBase(n));
+  function makeUrl(n, bust = ensureCacheBust()) {
+    return withBust(makeUrlBase(n), bust);
+  }
+
+  function makeFrameKey(n, ctxMosaic = mosaic, ctxModel = model, ctxRun = run, bust = ensureCacheBust()) {
+    return `${bust}|${ctxMosaic}:${ctxModel}:${ctxRun}:${n}`;
   }
 
   function syncBoundsFromCfg() {
@@ -369,7 +395,7 @@
   }
 
   function getCachedForDisplay(n) {
-    const key = `${mosaic}:${model}:${run}:${n}`;
+    const key = makeFrameKey(n);
 
     const main = cache.get(key);
     if (main) {
@@ -388,7 +414,7 @@
   }
 
   function getCachedAny(n) {
-    const key = `${mosaic}:${model}:${run}:${n}`;
+    const key = makeFrameKey(n);
     return (cache.get(key)?.img) || (warmCache.get(key)?.img) || null;
   }
 
@@ -401,13 +427,13 @@
     const ctxMosaic = mosaic;
     const ctxModel = model;
     const ctxRun = run;
-    const ctxBust = cacheBust;
+    const ctxBust = ensureCacheBust();
 
-    const key = `${ctxMosaic}:${ctxModel}:${ctxRun}:${n}`;
+    const key = makeFrameKey(n, ctxMosaic, ctxModel, ctxRun, ctxBust);
 
     let task = inflight.get(key);
     if (!task) {
-      const url = makeUrl(n);
+      const url = makeUrl(n, ctxBust);
       task = (async () => {
         const im = new Image();
         im.decoding = "async";
@@ -506,8 +532,34 @@
 
   async function render(targetIdx) {
     const myToken = ++navToken;
-    idx = clamp(targetIdx);
+    const nextIdx = clamp(targetIdx);
+    const dir = Math.sign(nextIdx - idx);
+    if (dir) lastNavDir = dir;
+    idx = nextIdx;
     updateHeader();
+
+    const cachedNow = getCachedForDisplay(idx);
+    if (cachedNow) {
+      naturalW = cachedNow.naturalWidth || naturalW;
+      naturalH = cachedNow.naturalHeight || naturalH;
+
+      imgEl.src = cachedNow.src;
+
+      if (!keepZoomChk.checked) {
+        fitToViewport();
+        didInitialFit = true;
+      } else if (!didInitialFit) {
+        fitToViewport();
+        didInitialFit = true;
+      } else {
+        applyZoom(false);
+      }
+
+      showSpinner(false);
+      setStatus("");
+      schedulePrefetch();
+      return;
+    }
 
     showSpinner(true);
     setStatus("carregando…");
@@ -582,7 +634,7 @@
     if (n < MIN || n > MAX) return;
     if (prefetchSet.has(n)) return;
 
-    const key = `${mosaic}:${model}:${run}:${n}`;
+    const key = makeFrameKey(n);
     if (cache.has(key) || warmCache.has(key) || inflight.has(key)) return;
 
     prefetchSet.add(n);
@@ -597,7 +649,7 @@
       const n = prefetchQueue.shift();
       prefetchSet.delete(n);
 
-      const key = `${mosaic}:${model}:${run}:${n}`;
+      const key = makeFrameKey(n);
       if (cache.has(key) || warmCache.has(key) || inflight.has(key)) continue;
 
       prefetchActive++;
@@ -626,8 +678,13 @@
     if (k <= 0) return;
 
     for (let d = 1; d <= k; d++) {
-      enqueuePrefetch(idx + d);
-      enqueuePrefetch(idx - d);
+      if (lastNavDir < 0) {
+        enqueuePrefetch(idx - d);
+        enqueuePrefetch(idx + d);
+      } else {
+        enqueuePrefetch(idx + d);
+        enqueuePrefetch(idx - d);
+      }
     }
 
     const myJob = prefetchJobId;
